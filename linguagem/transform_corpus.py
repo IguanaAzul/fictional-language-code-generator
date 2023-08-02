@@ -21,9 +21,8 @@ def term_frequency_from_corpus(corpus_list: list, term_frequency=None):
     return sorted(term_frequency.items(), key=lambda x: x[1], reverse=True)
 
 
-def aplicar_spacy(term_frequency, filter_frequency=0):
+def aplicar_spacy(term_frequency):
     df_palavras = pd.DataFrame(term_frequency, columns=["palavra", "frequencia"])
-    df_palavras = df_palavras[df_palavras["frequencia"] > filter_frequency] if filter_frequency else df_palavras
 
     def apply_spacy(df_row):
         df_row["lemma"] = spacy_text_analyser(df_row["palavra"])[0].lemma_
@@ -57,7 +56,7 @@ def tratar_classes_gramaticais(df_palavras):
              }, inplace=True
         )
     )
-    df_palavras["classe_gramatical"] = df_palavras["classe_gramatical"].replace({"AUX": "VERB"})
+    df_palavras.loc[:, "classe_gramatical"] = df_palavras.loc[:, "classe_gramatical"].replace({"AUX": "VERB"})
     df_palavras = (
         df_palavras.loc[~df_palavras["classe_gramatical"].isin(["X", "SYM", "INTJ", "PROPN", "PUNCT", "PART", "NUM"])]
     )
@@ -77,6 +76,23 @@ def tratar_classes_gramaticais(df_palavras):
         }
     )
 
+    def apply_morph(df_row):
+        df_row["Morph"] = spacy_text_analyser(df_row["palavra"])[0].morph
+        return df_row
+
+    df_palavras = (
+        df_palavras
+        .swifter
+        .progress_bar(True, desc="morph")
+        .allow_dask_on_strings(enable=True)
+        .force_parallel(enable=True)
+        .apply(apply_morph, axis=1)
+    )
+    morphs = set()
+    for row in tqdm(df_palavras["Morph"].astype(str)):
+        for found in re.findall(r"(?:^| |\|)(.*?)=", row):
+            morphs.add(found)
+
     # Separando em dataframes por classe gramatical
     df_substantivos = df_palavras.loc[df_palavras["classe_gramatical"] == "Substantivo"]
     df_verbos = df_palavras.loc[df_palavras["classe_gramatical"] == "Verbo"]
@@ -86,10 +102,6 @@ def tratar_classes_gramaticais(df_palavras):
     df_pronomes = df_palavras.loc[df_palavras["classe_gramatical"] == "Pronome"]
     df_artigos = df_palavras.loc[df_palavras["classe_gramatical"] == "Artigo"]
     df_conjuncoes = df_palavras.loc[df_palavras["classe_gramatical"] == "Conjuncao"]
-
-    def apply_morph(df_row):
-        df_row["Morph"] = spacy_text_analyser(df_row["palavra"])[0].morph
-        return df_row
 
     def apply_morph_cols(df_row, cols):
         morph = spacy_text_analyser(df_row["palavra"])[0].morph
@@ -109,12 +121,15 @@ def tratar_classes_gramaticais(df_palavras):
             df_artigos,
             df_conjuncoes,
     ):
-        df = df.apply(apply_morph, axis=1)
-        morphs = set()
-        for row in df["Morph"].astype(str):
-            for found in re.findall(r"(?:^| |\|)(.*?)=", row):
-                morphs.add(found)
-        df = df.apply(lambda x: apply_morph_cols(x, morphs), axis=1)
+        df = (
+            df
+            .swifter
+            .progress_bar(True, desc="morphs")
+            .allow_dask_on_strings(enable=True)
+            .force_parallel(enable=True)
+            .apply(lambda x: apply_morph_cols(x, morphs), axis=1)
+        )
+
         df.drop(columns=["Morph"], inplace=True)
         for m in morphs:
             df[m] = df[m].astype(str).str.replace("[", "").str.replace("]", "").str.replace("'", "")
