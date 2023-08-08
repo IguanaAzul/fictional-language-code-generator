@@ -9,7 +9,7 @@ tqdm.pandas()
 spacy_text_analyser = spacy.load('pt_core_news_md')
 
 
-def term_frequency_from_corpus(corpus_list: list, term_frequency=None):
+def term_frequency_from_corpus_carolina(corpus_list: list, term_frequency=None):
     term_frequency = dict() if term_frequency is None else term_frequency
     for corpus in corpus_list:
         for text in tqdm(corpus["corpus"]["text"]):
@@ -18,6 +18,16 @@ def term_frequency_from_corpus(corpus_list: list, term_frequency=None):
                     continue
                 word = word.lower()
                 term_frequency[word] = term_frequency[word] + 1 if word in term_frequency.keys() else 1
+    return sorted(term_frequency.items(), key=lambda x: x[1], reverse=True)
+
+
+def term_frequency_from_corpus_senhor_aneis(text: list, term_frequency=None):
+    term_frequency = dict() if term_frequency is None else term_frequency
+    for word in wordpunct_tokenize(text):
+        if not word.isalpha():
+            continue
+        word = word.lower()
+        term_frequency[word] = term_frequency[word] + 1 if word in term_frequency.keys() else 1
     return sorted(term_frequency.items(), key=lambda x: x[1], reverse=True)
 
 
@@ -88,10 +98,6 @@ def tratar_classes_gramaticais(df_palavras):
         .force_parallel(enable=True)
         .apply(apply_morph, axis=1)
     )
-    morphs = set()
-    for row in tqdm(df_palavras["Morph"].astype(str)):
-        for found in re.findall(r"(?:^| |\|)(.*?)=", row):
-            morphs.add(found)
 
     # Separando em dataframes por classe gramatical
     df_substantivos = df_palavras.loc[df_palavras["classe_gramatical"] == "Substantivo"]
@@ -121,6 +127,10 @@ def tratar_classes_gramaticais(df_palavras):
             df_artigos,
             df_conjuncoes,
     ):
+        morphs = set()
+        for row in tqdm(df["Morph"].astype(str)):
+            for found in re.findall(r"(?:^| |\|)(.*?)=", row):
+                morphs.add(found)
         df = (
             df
             .swifter
